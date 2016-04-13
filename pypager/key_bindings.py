@@ -193,7 +193,7 @@ def create_key_bindings(pager):
             else:  # Custom mark.
                 cursor_pos, vertical_scroll = pager.marks[mark]
         except KeyError:
-            pass  # TODO: show warning.
+            pager.message = 'Unknown mark.'
         else:
             b.cursor_position = cursor_pos
             pager.layout.buffer_window.vertical_scroll = vertical_scroll
