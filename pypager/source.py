@@ -89,7 +89,7 @@ class PipeSource(Source):
         # Content is ready for reading on stdin.
         data = self._stdin_reader.read()
 
-        if not data:
+        if self._stdin_reader.closed:
             self._eof = True
 
         # Send input data to the parser.
