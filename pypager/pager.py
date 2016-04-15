@@ -14,7 +14,6 @@ from prompt_toolkit.contrib.completers import PathCompleter
 from prompt_toolkit.document import Document
 from prompt_toolkit.input import StdinInput
 from prompt_toolkit.interface import CommandLineInterface
-from prompt_toolkit.key_binding.vi_state import ViState
 from prompt_toolkit.layout.lexers import PygmentsLexer
 from prompt_toolkit.shortcuts import create_eventloop
 from prompt_toolkit.styles import Style
@@ -75,7 +74,6 @@ class Pager(object):
         self.sources = []
         self.current_source = 0  # Index in `self.sources`.
         self.vi_mode = vi_mode
-        self.vi_state = ViState()
         self.highlight_search = True
         self.in_colon_mode = False
         self.message = None
