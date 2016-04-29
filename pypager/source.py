@@ -16,6 +16,7 @@ import types
 import six
 import codecs
 import os
+import re
 
 __all__ = (
     'Source',
@@ -71,9 +72,16 @@ class PipeSource(Source):
             color=None, bgcolor=None, bold=False, underline=False,
             italic=False, blink=False, reverse=False)
 
+        # Create a regular expression pattern that matches everything what can
+        # be considered plain text. This can be used as a very simple lexer
+        # that can feed the "plain text part" as one token into the screen.
+        special = set(['\x1b', '\x9b', '\b', '\n']) 
+        self._text_search = re.compile(
+            '[^%s]+' % ''.join(re.escape(c) for c in special)).match
+
         # Start input parser.
         self._parser = self._parse_corot()
-        next(self._parser)
+        self._taking_plain_text = self._parser.send(None)
         self._stdin_reader = PosixStdinReader(fileno)
 
     def get_name(self):
@@ -87,14 +95,37 @@ class PipeSource(Source):
 
     def read_chunk(self):
         # Content is ready for reading on stdin.
-        data = self._stdin_reader.read()
+        chars = self._stdin_reader.read()
 
         if self._stdin_reader.closed:
             self._eof = True
 
+        # Local copies of variables.
+        taking_plain_text = self._taking_plain_text
+        text_search = self._text_search
+        send = self._parser.send
+        append = self._line_tokens.append
+
         # Send input data to the parser.
-        for c in data:
-            self._parser.send(c)
+        i = 0
+        count = len(chars)
+
+        while i < count:
+            # Reading plain text? Don't send characters one by one in the
+            # generator, but optimize and send the whole chunk without
+            # escapes directly to the listener.
+            if taking_plain_text:
+                match = text_search(chars, i)
+                if match:
+                    start, i = match.span()
+                    append((taking_plain_text, chars[start:i]))
+                else:
+                    taking_plain_text = False
+
+            # The parser expects just one character now. Just send the next one.
+            else:
+                taking_plain_text = send(chars[i])
+                i += 1
 
         # Return the tokens from the parser.
         # (Don't return the last token yet, because the parser should
@@ -106,6 +137,7 @@ class PipeSource(Source):
             tokens = self._line_tokens[:-1]
             del self._line_tokens[:-1]
 
+        self._taking_plain_text = taking_plain_text
         return tokens
 
     def _parse_corot(self):
@@ -116,22 +148,25 @@ class PipeSource(Source):
         """
         token = Token
         line_tokens = self._line_tokens
-        replace_one_token = False
 
         while True:
             csi = False
-            c = yield
+            c = yield token # (`True` tells the 'send()' function that it
+                           # is allowed to process chunks of plain text
+                           # directly, rather than sending it in this
+                           # generator.)
 
             if c == '\b':
                 # Handle \b escape codes from man pages.
                 if line_tokens:
                     _, last_char = line_tokens[-1]
                     line_tokens.pop()
-                    replace_one_token = True
                     if last_char == '_':
-                        token = Token.Standout2
+                        temp_token = Token.Standout2
                     else:
-                        token = Token.Standout
+                        temp_token = Token.Standout
+                    line_tokens.append((temp_token, (yield)))
+                    token = Token
                 continue
 
             elif c == '\x1b':
@@ -166,8 +201,6 @@ class PipeSource(Source):
                             break
             else:
                 line_tokens.append((token, c))
-                if replace_one_token:
-                    token = Token
 
     def _select_graphic_rendition(self, attrs):
         """
