@@ -1,12 +1,11 @@
 from __future__ import unicode_literals
 from prompt_toolkit.enums import SYSTEM_BUFFER
 from prompt_toolkit.filters import HasArg, Condition, HasSearch, HasFocus
-from prompt_toolkit.layout.containers import HSplit, VSplit, Window, ConditionalContainer, Float, FloatContainer, Container
+from prompt_toolkit.layout.containers import HSplit, VSplit, Window, ConditionalContainer, Float, FloatContainer, Container, Align
 from prompt_toolkit.layout.controls import BufferControl, TokenListControl
-from prompt_toolkit.layout.dimension import LayoutDimension as D
+from prompt_toolkit.layout.dimension import Dimension as D
 from prompt_toolkit.layout.menus import MultiColumnCompletionsMenu
-from prompt_toolkit.layout.processors import Processor, HighlightSelectionProcessor, HighlightSearchProcessor, HighlightMatchingBracketProcessor, TabsProcessor, Transformation, ConditionalProcessor, BeforeInput
-from prompt_toolkit.layout.screen import Char
+from prompt_toolkit.layout.processors import Processor, HighlightSelectionProcessor, HighlightSearchProcessor, HighlightMatchingBracketProcessor, TabsProcessor, Transformation, ConditionalProcessor, BeforeInput, MergedProcessor
 from prompt_toolkit.layout.lexers import SimpleLexer
 from prompt_toolkit.layout.toolbars import SearchToolbar, SystemToolbar, TokenListToolbar
 from prompt_toolkit.token import Token
@@ -16,7 +15,7 @@ from .filters import HasColon
 import weakref
 
 __all__ = (
-    'Layout',
+    'PagerLayout',
 )
 
 
@@ -24,24 +23,25 @@ class _EscapeProcessor(Processor):
     """
     Interpret escape sequences like less/more/most do.
     """
-    def __init__(self, pager):
-        self.pager = pager
+    def __init__(self, source_info):
+        self.source_info = source_info
 
-    def apply_transformation(self, cli, document, lineno, source_to_display, tokens):
-        tokens = self.pager.line_tokens[lineno]
+    def apply_transformation(self, ti):
+        tokens = self.source_info.line_tokens[ti.lineno]
         return Transformation(tokens[:])
 
 
 class _Arg(ConditionalContainer):
     def __init__(self):
-        def get_tokens(cli):
-            if cli.input_processor.arg is not None:
-                return [(Token.Arg, ' %i ' % cli.input_processor.arg)]
+        def get_tokens(app):
+            if app.key_processor.arg is not None:
+                return [(Token.Arg, ' %s ' % app.key_processor.arg)]
             else:
                 return []
 
         super(_Arg, self).__init__(
-                Window(TokenListControl(get_tokens, align_right=True)),
+                Window(TokenListControl(get_tokens)),
+#, align_right=True)),
                 filter=HasArg())
 
 
@@ -50,13 +50,13 @@ class Titlebar(TokenListToolbar):
     Displayed at the top.
     """
     def __init__(self, pager):
-        def get_tokens(cli):
+        def get_tokens(app):
             return pager.titlebar_tokens
 
         super(Titlebar, self).__init__(
             get_tokens,
-            default_char=Char(' ', Token.Titlebar),
-            filter=Condition(lambda cli: pager.display_titlebar))
+#            default_char=Char(' ', Token.Titlebar),
+            filter=Condition(lambda app: pager.display_titlebar))
 
 
 class MessageToolbarBar(TokenListToolbar):
@@ -64,12 +64,12 @@ class MessageToolbarBar(TokenListToolbar):
     Pop-up (at the bottom) for showing error/status messages.
     """
     def __init__(self, pager):
-        def get_tokens(cli):
+        def get_tokens(app):
             return [(Token.Message, pager.message)] if pager.message else []
 
         super(MessageToolbarBar, self).__init__(
             get_tokens,
-            filter=Condition(lambda cli: bool(pager.message)))
+            filter=Condition(lambda app: bool(pager.message)))
 
 
 class _DynamicBody(Container):
@@ -79,33 +79,7 @@ class _DynamicBody(Container):
 
     def get_buffer_window(self):
         " Return the Container object according to which Buffer/Source is visible. "
-        source = self.pager.source
-
-        if source not in self._bodies:
-            input_processors = [
-                ConditionalProcessor(
-                    processor=_EscapeProcessor(self.pager),
-                    filter=Condition(lambda cli: not bool(self.pager.source.lexer)),
-                ),
-                TabsProcessor(),
-                HighlightSelectionProcessor(),
-                ConditionalProcessor(
-                    processor=HighlightSearchProcessor(preview_search=True),
-                    filter=Condition(lambda cli: self.pager.highlight_search),
-                ),
-                HighlightMatchingBracketProcessor(),
-            ]
-
-            buffer_window = Window(
-                always_hide_cursor=True,
-                content=BufferControl(
-                    buffer_name=self.pager.source_info[source].buffer_name,
-                    lexer=source.lexer,
-                    input_processors=input_processors))
-
-            self._bodies[source] = buffer_window
-
-        return self._bodies[source]
+        return self.pager.source_info[self.pager.source].window
 
     def reset(self):
         for body in self._bodies.values():
@@ -128,7 +102,7 @@ class _DynamicBody(Container):
         return self.get_buffer_window().walk(*a, **kw)
 
 
-class Layout(object):
+class PagerLayout(object):
     def __init__(self, pager):
         self.pager = pager
         self.dynamic_body = _DynamicBody(pager)
@@ -136,52 +110,57 @@ class Layout(object):
         # Build an interface.
         has_colon = HasColon(pager)
 
+        self.examine_control = BufferControl(
+            buffer=pager.examine_buffer,
+            lexer=SimpleLexer(token=Token.Toolbar.Examine.Text),
+            input_processor=BeforeInput(
+                lambda app: [(Token.Toolbar.Examine, ' Examine: ')]),
+            )
+
+        self.search_toolbar = SearchToolbar(
+            vi_mode=True,
+            search_buffer=pager.search_buffer)
+
         self.container = FloatContainer(
             content=HSplit([
                 Titlebar(pager),
                 self.dynamic_body,
-                SearchToolbar(vi_mode=True),
-                SystemToolbar(),
+                self.search_toolbar,
+                SystemToolbar(loop=pager.loop),
                 ConditionalContainer(
                     content=VSplit([
                             Window(height=D.exact(1),
-                                   content=TokenListControl(
-                                       self._get_statusbar_left_tokens,
-                                       default_char=Char(' ', Token.Statusbar))),
+                                   content=TokenListControl(self._get_statusbar_left_tokens),
+                                    token=Token.Statusbar),
                             Window(height=D.exact(1),
-                                   content=TokenListControl(
-                                       self._get_statusbar_right_tokens,
-                                       align_right=True,
-                                       default_char=Char(' ', Token.Statusbar))),
+                                   content=TokenListControl(self._get_statusbar_right_tokens),
+                                   token=Token.Statusbar,
+                                   align=Align.RIGHT),
                         ]),
                     filter=~HasSearch() & ~HasFocus(SYSTEM_BUFFER) & ~has_colon & ~HasFocus('EXAMINE')),
                 ConditionalContainer(
                     content=TokenListToolbar(
-                        lambda cli: [(Token.Statusbar, ' :')],
-                        default_char=Char(token=Token.Statusbar)),
+                        lambda app: [(Token.Statusbar, ' :')],
+#                        default_char=Char(token=Token.Statusbar)
+                    ),
                     filter=has_colon),
                 ConditionalContainer(
                     content=Window(
-                        BufferControl(
-                            buffer_name='EXAMINE',
-                            default_char=Char(token=Token.Toolbar.Examine),
-                            lexer=SimpleLexer(default_token=Token.Toolbar.Examine.Text),
-                            input_processors=[
-                                BeforeInput(lambda cli: [(Token.Toolbar.Examine, ' Examine: ')]),
-                            ]),
-                        height=D.exact(1)),
-                    filter=HasFocus('EXAMINE')),
-                ConditionalContainer(
-                    content=Window(
-                        BufferControl(
-                            buffer_name='PATTERN_FILTER',
-                            default_char=Char(token=Token.Toolbar.Search),
-                            lexer=SimpleLexer(default_token=Token.Toolbar.Search.Text),
-                            input_processors=[
-                                BeforeInput(lambda cli: [(Token.Toolbar.Search, '&/')]),
-                            ]),
-                        height=D.exact(1)),
-                    filter=HasFocus('PATTERN_FILTER')),
+                        self.examine_control,
+                        height=D.exact(1),
+                        token=Token.Toolbar.Examine),
+                    filter=HasFocus(pager.examine_buffer)),
+#                ConditionalContainer(
+#                    content=Window(
+#                        BufferControl(
+#                            buffer_name='PATTERN_FILTER',
+#                            lexer=SimpleLexer(default_token=Token.Toolbar.Search.Text),
+#                            input_processor=BeforeInput(
+#                                lambda app: [(Token.Toolbar.Search, '&/')]),
+#                            ),
+#                        token=Token.Toolbar.Search,
+#                        height=D.exact(1)),
+#                    filter=HasFocus('PATTERN_FILTER')),
             ]),
             floats=[
                 Float(right=0, height=1, bottom=1,
@@ -191,20 +170,21 @@ class Layout(object):
                 Float(right=0, height=1, bottom=1,
                       content=ConditionalContainer(
                           content=TokenListToolbar(
-                              lambda cli: [(Token.Loading, ' Loading... ')],
-                              default_char=Char(token=Token.Statusbar)),
-                          filter=Condition(lambda cli: pager.waiting_for_input_stream))),
+                              lambda app: [(Token.Loading, ' Loading... ')],
+#                              default_char=Char(token=Token.Statusbar)
+                          ),
+                          filter=Condition(lambda app: pager.current_source_info.waiting_for_input_stream))),
                 Float(xcursor=True,
                       ycursor=True,
                       content=MultiColumnCompletionsMenu()),
             ]
         )
 
-    @property
-    def buffer_window(self):
-        return self.dynamic_body.get_buffer_window()
+#    @property
+#    def buffer_window(self):
+#        return self.dynamic_body.get_buffer_window()
 
-    def _get_statusbar_left_tokens(self, cli):
+    def _get_statusbar_left_tokens(self, app):
         """
         Displayed at the bottom left.
         """
@@ -214,7 +194,7 @@ class Layout(object):
             message = ' (press h for help or q to quit)'
         return [(Token.Statusbar, message)]
 
-    def _get_statusbar_right_tokens(self, cli):
+    def _get_statusbar_right_tokens(self, app):
         """
         Displayed at the bottom right.
         """
@@ -232,3 +212,33 @@ class Layout(object):
             return [
                 (Token.Statusbar.CursorPosition,
                  ' (%s,%s) ' % (row, col))]
+
+
+
+def create_buffer_window(source_info):
+    """
+    Window for the main content.
+    """
+    pager = source_info.pager
+
+    input_processor = MergedProcessor([
+        ConditionalProcessor(
+            processor=_EscapeProcessor(source_info),
+            filter=Condition(lambda app: not bool(source_info.source.lexer)),
+        ),
+        TabsProcessor(),
+        HighlightSelectionProcessor(),
+        ConditionalProcessor(
+            processor=HighlightSearchProcessor(preview_search=True),
+            filter=Condition(lambda app: pager.highlight_search),
+        ),
+        HighlightMatchingBracketProcessor(),
+    ])
+
+    return Window(
+        always_hide_cursor=True,
+        content=BufferControl(
+            buffer=source_info.buffer,
+            lexer=source_info.source.lexer,
+            input_processor=input_processor,
+            search_buffer_control=pager.layout.search_toolbar.control))

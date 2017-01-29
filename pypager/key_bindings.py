@@ -2,11 +2,10 @@ from __future__ import unicode_literals
 from prompt_toolkit.enums import SEARCH_BUFFER, IncrementalSearchDirection
 from prompt_toolkit.filters import HasFocus, Condition
 from prompt_toolkit.key_binding.bindings.scroll import scroll_page_up, scroll_page_down, scroll_one_line_down, scroll_one_line_up, scroll_half_page_up, scroll_half_page_down
+from prompt_toolkit.key_binding import KeyBindings, MergedKeyBindings
 from prompt_toolkit.key_binding.defaults import load_key_bindings
 from prompt_toolkit.key_binding.vi_state import InputMode
 from prompt_toolkit.keys import Keys
-from prompt_toolkit.layout.lexers import PygmentsLexer
-from prompt_toolkit.layout.utils import find_window_for_buffer_name
 from prompt_toolkit.utils import suspend_to_background_supported
 
 
@@ -15,23 +14,22 @@ __all__ = (
 )
 
 def create_key_bindings(pager):
-    registry = load_key_bindings(
-        enable_search=True,
-        enable_extra_page_navigation=True,
-        enable_system_bindings=True)
-    handle = registry.add_binding
+    kb = KeyBindings()
+    handle = kb.add
 
     @Condition
-    def has_colon(cli):
+    def has_colon(app):
         return pager.in_colon_mode
 
     @Condition
-    def default_focus(cli):
-        return (cli.current_buffer_name.startswith('source') and
+    def default_focus(app):
+        return app.layout.current_window == pager.current_source_info.window
+        return True  # XXX
+        return (app.current_buffer_name.startswith('source') and
                 not pager.in_colon_mode)
 
     @Condition
-    def displaying_help(cli):
+    def displaying_help(app):
        return pager.displaying_help
 
     for c in '01234556789':
@@ -47,7 +45,7 @@ def create_key_bindings(pager):
         if pager.displaying_help:
             pager.quit_help()
         else:
-            event.cli.set_return_value(None)
+            event.app.set_return_value(None)
 
     @handle(' ', filter=default_focus)
     @handle('f', filter=default_focus)
@@ -104,33 +102,33 @@ def create_key_bindings(pager):
         else:
             scroll_one_line_up(event)
 
-    @handle('/', filter=default_focus)
-    def _(event):
-        " Start searching forward. "
-        event.cli.search_state.direction = IncrementalSearchDirection.FORWARD
-        event.cli.vi_state.input_mode = InputMode.INSERT
-        event.cli.push_focus(SEARCH_BUFFER)
+#    @handle('/', filter=default_focus)
+#    def _(event):
+#        " Start searching forward. "
+#        event.app.search_state.direction = IncrementalSearchDirection.FORWARD
+#        event.app.vi_state.input_mode = InputMode.INSERT
+#        event.app.push_focus(SEARCH_BUFFER)
+#
+#    @handle('?', filter=default_focus)
+#    def _(event):
+#        " Start searching backwards. "
+#        event.app.search_state.direction = IncrementalSearchDirection.BACKWARD
+#        event.app.vi_state.input_mode = InputMode.INSERT
+#        event.app.push_focus(SEARCH_BUFFER)
 
-    @handle('?', filter=default_focus)
-    def _(event):
-        " Start searching backwards. "
-        event.cli.search_state.direction = IncrementalSearchDirection.BACKWARD
-        event.cli.vi_state.input_mode = InputMode.INSERT
-        event.cli.push_focus(SEARCH_BUFFER)
-
-    @handle('n', filter=default_focus)
-    def _(event):
-        " Search next. "
-        event.current_buffer.apply_search(
-            event.cli.search_state, include_current_position=False,
-            count=event.arg)
-
-    @handle('N', filter=default_focus)
-    def _(event):
-        " Search previous. "
-        event.current_buffer.apply_search(
-            ~event.cli.search_state, include_current_position=False,
-            count=event.arg)
+#    @handle('n', filter=default_focus)
+#    def _(event):
+#        " Search next. "
+#        event.current_buffer.apply_search(
+#            event.app.search_state, include_current_position=False,
+#            count=event.arg)
+#
+#    @handle('N', filter=default_focus)
+#    def _(event):
+#        " Search previous. "
+#        event.current_buffer.apply_search(
+#            ~event.app.search_state, include_current_position=False,
+#            count=event.arg)
 
     @handle(Keys.Escape, 'u')
     def _(event):
@@ -206,25 +204,25 @@ def create_key_bindings(pager):
     @handle('r', filter=default_focus)
     @handle('R', filter=default_focus)
     def _(event):
-        event.cli.renderer.clear()
+        event.app.renderer.clear()
 
-    def search_buffer_is_empty(cli):
+    def search_buffer_is_empty(app):
         " Returns True when the search buffer is empty. "
-        return cli.buffers[SEARCH_BUFFER].text == ''
+        return pager.search_buffer.text == ''
 
     @handle(Keys.Backspace, filter=HasFocus(SEARCH_BUFFER) & Condition(search_buffer_is_empty))
     def _(event):
         " Cancel search when backspace is pressed. "
-        event.cli.vi_state.input_mode = InputMode.NAVIGATION
-        event.cli.pop_focus()
-        event.cli.buffers[SEARCH_BUFFER].reset()
+        event.app.vi_state.input_mode = InputMode.NAVIGATION
+        event.app.pop_focus()
+        pager.search_buffer.reset()
 
     @handle(Keys.Left, filter=default_focus)
     @handle(Keys.Escape, '(', filter=default_focus)
     def _(event):
         " Scroll half page to the left. "
-        w = find_window_for_buffer_name(event.cli, event.cli.current_buffer_name)
-        b = event.cli.current_buffer
+        w = event.app.layout.current_window
+        b = event.app.current_buffer
 
         if w and w.render_info:
             info = w.render_info
@@ -241,8 +239,8 @@ def create_key_bindings(pager):
     @handle(Keys.Escape, ')', filter=default_focus)
     def _(event):
         " Scroll half page to the right. "
-        w = find_window_for_buffer_name(event.cli, event.cli.current_buffer_name)
-        b = event.cli.current_buffer
+        w = event.app.layout.current_window
+        b = event.app.current_buffer
 
         if w and w.render_info:
             info = w.render_info
@@ -278,7 +276,7 @@ def create_key_bindings(pager):
     @handle('e', filter=has_colon)
     @handle(Keys.ControlX, Keys.ControlV, filter=default_focus)
     def _(event):
-        pager.buffers.focus(event.cli, 'EXAMINE')
+        event.app.layout.focus(pager.layout.examine_control)
         pager.in_colon_mode = False
 
     @handle('d', filter=has_colon)
@@ -295,11 +293,17 @@ def create_key_bindings(pager):
     @handle(Keys.ControlG, filter=HasFocus('EXAMINE'))
     def _(event):
         " Cancel 'Examine' input. "
-        pager.buffers.focus(event.cli, pager.source_info[pager.source].buffer_name)
+        event.app.layout.focus(pager.current_source_info.window)
 
-    @handle(Keys.ControlZ, filter=Condition(lambda cli: suspend_to_background_supported()))
+    @handle(Keys.ControlZ, filter=Condition(lambda app: suspend_to_background_supported()))
     def _(event):
         " Suspend to bakground. "
-        event.cli.suspend_to_background()
+        event.app.suspend_to_background()
 
-    return registry
+    return MergedKeyBindings([
+        load_key_bindings(
+            enable_search=True,
+            enable_extra_page_navigation=True,
+            enable_system_bindings=True),
+        kb
+    ])

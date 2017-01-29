@@ -8,20 +8,19 @@ import weakref
 from pygments.lexers.markup import RstLexer
 
 from prompt_toolkit.application import Application
-from prompt_toolkit.buffer import Buffer, AcceptAction
-from prompt_toolkit.buffer_mapping import BufferMapping
+from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.contrib.completers import PathCompleter
 from prompt_toolkit.document import Document
 from prompt_toolkit.enums import EditingMode
-from prompt_toolkit.input import StdinInput
-from prompt_toolkit.interface import CommandLineInterface
+from prompt_toolkit.eventloop.base import EventLoop
+from prompt_toolkit.input.defaults import create_input
+from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.layout.lexers import PygmentsLexer
-from prompt_toolkit.shortcuts import create_eventloop
 from prompt_toolkit.styles import Style
 
 from .help import HELP
 from .key_bindings import create_key_bindings
-from .layout import Layout
+from .layout import PagerLayout, create_buffer_window
 from .source import FileSource, PipeSource, Source
 from .source import StringSource
 from .style import create_style
@@ -36,9 +35,14 @@ class _SourceInfo(object):
     """
     _buffer_counter = 0  # Counter to generate unique buffer names.
 
-    def __init__(self):
-        self.buffer = Buffer(is_multiline=True, read_only=True)
-        self.buffer_name = self._generate_buffer_name()
+    def __init__(self, pager, source):
+        assert isinstance(pager, Pager)
+        assert isinstance(source, Source)
+
+        self.pager = pager
+        self.source = source
+
+        self.buffer = Buffer(loop=pager.loop, read_only=True)
 
         # List of lines. (Each line is a list of (token, text) tuples itself.)
         self.line_tokens = [[]]
@@ -50,11 +54,7 @@ class _SourceInfo(object):
         # source in a coroutine.
         self.waiting_for_input_stream = False
 
-    @classmethod
-    def _generate_buffer_name(cls):
-        " Generate a new buffer name. "
-        cls._buffer_counter += 1
-        return 'source_%i' % cls._buffer_counter
+        self.window = create_buffer_window(self)
 
 
 class Pager(object):
@@ -72,14 +72,16 @@ class Pager(object):
     :param style: Prompt_toolkit `Style` instance.
     :param search_text: `None` or the search string that is highlighted.
     """
-    def __init__(self, vi_mode=False, style=None, search_text=None,
+    def __init__(self, loop, vi_mode=False, style=None, search_text=None,
                  titlebar_tokens=None):
+        assert isinstance(loop, EventLoop)
         assert isinstance(vi_mode, bool)
         assert style is None or isinstance(style, Style)
 
+        self.loop = loop
+
         self.sources = []
-        self.current_source = 0  # Index in `self.sources`.
-        self.vi_mode = vi_mode
+        self.current_source_index = 0  # Index in `self.sources`.
         self.highlight_search = True
         self.in_colon_mode = False
         self.message = None
@@ -97,77 +99,82 @@ class Pager(object):
         self.source_info = weakref.WeakKeyDictionary()
 
         # Create prompt_toolkit stuff.
-        self.buffers = BufferMapping({})
 
-        def open_file(cli, buff):
+        def open_file(app, buff):
             # Open file.
             self.open_file(buff.text)
 
             # Focus main buffer again.
-            self.buffers.focus(cli, self.source_info[self.source].buffer_name)
             buff.reset()
 
-        self.buffers['EXAMINE'] = Buffer(
-            # Buffer for the 'Examine:' input.
+        # Buffer for the 'Examine:' input.
+        self.examine_buffer = Buffer(
+            loop=self.loop,
+            name='EXAMINE',
             completer=PathCompleter(expanduser=True),
-            accept_action=AcceptAction(open_file))
+            accept_handler=open_file,
+            multiline=False)
 
-        self.layout = Layout(self)
+        # Search buffer.
+        self.search_buffer = Buffer(
+            loop=self.loop,
+            multiline=False)
 
-        registry = create_key_bindings(self)
+        self.layout = PagerLayout(self)
+
+        bindings = create_key_bindings(self)
         self.application = Application(
-            layout=self.layout.container,
-            buffers=self.buffers,
-            key_bindings_registry=registry,
+            loop=self.loop,
+            input=create_input(sys.stdout),
+            layout=Layout(container=self.layout.container),
+            key_bindings=bindings,
             style=style or create_style(),
             mouse_support=True,
             on_render=self._on_render,
-            use_alternate_screen=True,
-            on_initialize=self._on_cli_initialize)
+            use_alternate_screen=True)
 
-        self.cli = None
-        self.eventloop = None
+        # Hide message when a key is pressed.
+        def key_pressed(_):
+            self.message = None
+        self.application.key_processor.beforeKeyPress += key_pressed
 
-    def _on_cli_initialize(self, cli):
-        """
-        Called when a CommandLineInterface has been created.
-        """
-        def synchronize(_=None):
-            if self.vi_mode:
-                cli.editing_mode = EditingMode.VI
-            else:
-                cli.editing_mode = EditingMode.EMACS
-
-        cli.input_processor.beforeKeyPress += synchronize
-        cli.input_processor.afterKeyPress += synchronize
-        synchronize()
+        if vi_mode:
+            self.application.editing_mode = EditingMode.VI
 
     @classmethod
-    def from_pipe(cls, lexer=None):
+    def from_pipe(cls, loop, lexer=None):
         """
         Create a pager from another process that pipes in our stdin.
         """
         assert not sys.stdin.isatty()
-        self = cls()
+        self = cls(loop)
         self.add_source(PipeSource(fileno=sys.stdin.fileno(), lexer=lexer))
         return self
 
     @property
     def source(self):
         " The current `Source`. "
-        return self.sources[self.current_source]
+        return self.sources[self.current_source_index]
 
     @property
-    def line_tokens(self):
-        return self.source_info[self.source].line_tokens
+    def current_source(self):
+        return self.sources[self.current_source_index]
 
     @property
-    def waiting_for_input_stream(self):
-        return self.source_info[self.source].waiting_for_input_stream
+    def current_source_info(self):
+        return self.source_info[self.current_source]
 
-    @property
-    def marks(self):
-        return self.source_info[self.source].marks
+#    @property
+#    def line_tokens(self):
+#        return self.source_info[self.source].line_tokens
+#
+#    @property
+#    def waiting_for_input_stream(self):
+#        return self.source_info[self.source].waiting_for_input_stream
+#
+#    @property
+#    def marks(self):
+#        return self.source_info[self.source].marks
 
     def open_file(self, filename):
         """
@@ -188,15 +195,14 @@ class Pager(object):
         """
         assert isinstance(source, Source)
 
-        source_info = _SourceInfo()
+        source_info = _SourceInfo(self, source)
         self.source_info[source] = source_info
 
-        self.buffers[source_info.buffer_name] = source_info.buffer
         self.sources.append(source)
 
         # Focus
-        self.current_source = len(self.sources) - 1
-        self.buffers.focus(None, source_info.buffer_name)
+        self.current_source_index = len(self.sources) - 1
+        self.application.layout.focus(source_info.window)
 
     def remove_current_source(self):
         """
@@ -204,26 +210,24 @@ class Pager(object):
         (If >1 source is left.)
         """
         if len(self.sources) > 1:
-            current_source = self.source
+            current_source_index = self.source
 
             # Focus the previous source.
             self.focus_previous_source()
 
             # Remove the last source.
-            buffer_name = self.source_info[current_source].buffer_name
-            self.sources.remove(current_source)
-            del self.buffers[buffer_name]
+            self.sources.remove(current_source_index)
         else:
             self.message = "Can't remove the last buffer."
 
     def focus_previous_source(self):
-        self.current_source = (self.current_source - 1) % len(self.sources)
-        self.buffers.focus(None, self.source_info[self.source].buffer_name)
+        self.current_source_index = (self.current_source_index - 1) % len(self.sources)
+        self.application.layout.focus(self.current_source_info.window)
         self.in_colon_mode = False
 
     def focus_next_source(self):
-        self.current_source = (self.current_source + 1) % len(self.sources)
-        self.buffers.focus(None, self.source_info[self.source].buffer_name)
+        self.current_source_index = (self.current_source_index + 1) % len(self.sources)
+        self.application.layout.focus(self.current_source_info.window)
         self.in_colon_mode = False
 
     def display_help(self):
@@ -255,6 +259,7 @@ class Pager(object):
         source = self.source
         source_info = self.source_info[source]
         b = source_info.buffer
+        line_tokens = source_info.line_tokens
 
         if not source_info.waiting_for_input_stream and not source.eof() and info:
             lines_below_bottom = info.ui_content.line_count - info.last_visible_line()
@@ -273,12 +278,12 @@ class Pager(object):
                     for token_char in tokens:
                         char = token_char[1]
                         if char == '\n':
-                            self.line_tokens.append([])
+                            line_tokens.append([])
 
                             # Decrease line count.
                             lines[0] -= 1
                         else:
-                            self.line_tokens[-1].append(token_char)
+                            line_tokens[-1].append(token_char)
                         data.append(char)
                     return data
 
@@ -301,11 +306,11 @@ class Pager(object):
                     # or when there is nothing more to read.
                     if lines[0] <= 0 or source.eof():
                         if fd is not None:
-                            self.eventloop.remove_reader(fd)
+                            self.loop.remove_reader(fd)
                         source_info.waiting_for_input_stream = False
 
                     # Redraw.
-                    self.cli.invalidate()
+                    self.application.invalidate()
 
                 def receive_content_from_generator():
                     " (in executor) Read data from generator. "
@@ -316,17 +321,17 @@ class Pager(object):
                         insert_text(data)
 
                         # Schedule redraw.
-                        self.cli.invalidate()
+                        self.application.invalidate()
 
                     source_info.waiting_for_input_stream = False
 
                 # Set 'waiting_for_input_stream' and render.
                 source_info.waiting_for_input_stream = True
-                self.cli.invalidate()
+                self.application.invalidate()
 
                 # Add reader for stdin.
                 if fd is not None:
-                    self.eventloop.add_reader(fd, receive_content_from_fd)
+                    self.loop.add_reader(fd, receive_content_from_fd)
                 else:
                     # Execute receive_content_from_generator in thread.
                     # (Don't use 'run_in_executor', because we need a daemon.
@@ -338,29 +343,12 @@ class Pager(object):
         """
         Create an event loop for the application and run it.
         """
-        self.eventloop = create_eventloop()
-
         try:
-            self.cli = CommandLineInterface(
-                application=self.application,
-                eventloop=self.eventloop,
-                input=StdinInput(sys.stdout))
+            # Set search highlighting.
+            if self.search_text:
+                self.application.search_state.text = self.search_text
 
-            # Hide message when a key is pressed.
-            def key_pressed(_):
-                self.message = None
-            self.cli.input_processor.beforeKeyPress += key_pressed
-
-            def pre_run():
-                # Set search highlighting.
-                if self.search_text:
-                    self.cli.search_state.text = self.search_text
-
-            with self.cli.patch_stdout_context():
-                self.cli.run(reset_current_buffer=False, pre_run=pre_run)
+            return self.application.run()
         finally:
-            # Close eventloop.
-            self.eventloop.close()
-            self.eventloop = None
-
             # XXX: Close all sources which are opened by the pager itself.
+            pass

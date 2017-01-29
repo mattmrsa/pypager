@@ -6,11 +6,11 @@ from __future__ import unicode_literals
 from abc import ABCMeta, abstractmethod
 from six import with_metaclass
 from prompt_toolkit.token import Token
-from prompt_toolkit.eventloop.posix_utils import PosixStdinReader
+from prompt_toolkit.input.posix_utils import PosixStdinReader
 from prompt_toolkit.layout.utils import explode_tokens
 from prompt_toolkit.styles import Attrs
-from prompt_toolkit.terminal.vt100_output import FG_ANSI_COLORS, BG_ANSI_COLORS
-from prompt_toolkit.terminal.vt100_output import _256_colors as _256_colors_table
+from prompt_toolkit.output.vt100 import FG_ANSI_COLORS, BG_ANSI_COLORS
+from prompt_toolkit.output.vt100 import _256_colors as _256_colors_table
 from prompt_toolkit.layout.lexers import Lexer
 import types
 import six
