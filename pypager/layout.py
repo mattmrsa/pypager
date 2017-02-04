@@ -40,8 +40,7 @@ class _Arg(ConditionalContainer):
                 return []
 
         super(_Arg, self).__init__(
-                Window(TokenListControl(get_tokens)),
-#, align_right=True)),
+                Window(TokenListControl(get_tokens), align=Align.RIGHT),
                 filter=HasArg())
 
 
@@ -179,10 +178,6 @@ class PagerLayout(object):
                       content=MultiColumnCompletionsMenu()),
             ]
         )
-
-#    @property
-#    def buffer_window(self):
-#        return self.dynamic_body.get_buffer_window()
 
     def _get_statusbar_left_tokens(self, app):
         """

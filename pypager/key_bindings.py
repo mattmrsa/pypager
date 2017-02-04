@@ -2,7 +2,7 @@ from __future__ import unicode_literals
 from prompt_toolkit.enums import SEARCH_BUFFER, IncrementalSearchDirection
 from prompt_toolkit.filters import HasFocus, Condition
 from prompt_toolkit.key_binding.bindings.scroll import scroll_page_up, scroll_page_down, scroll_one_line_down, scroll_one_line_up, scroll_half_page_up, scroll_half_page_down
-from prompt_toolkit.key_binding import KeyBindings, MergedKeyBindings
+from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
 from prompt_toolkit.key_binding.defaults import load_key_bindings
 from prompt_toolkit.key_binding.vi_state import InputMode
 from prompt_toolkit.keys import Keys
@@ -200,7 +200,7 @@ def create_key_bindings(pager):
         " Forward forever, like 'tail -f'. "
         pager.forward_forever = True
 
-    @handle(Keys.ControlR, filter=default_focus)
+#    @handle(Keys.ControlR, filter=default_focus)
     @handle('r', filter=default_focus)
     @handle('R', filter=default_focus)
     def _(event):
@@ -300,10 +300,10 @@ def create_key_bindings(pager):
         " Suspend to bakground. "
         event.app.suspend_to_background()
 
-    return MergedKeyBindings([
+    return merge_key_bindings(
         load_key_bindings(
             enable_search=True,
             enable_extra_page_navigation=True,
             enable_system_bindings=True),
         kb
-    ])
+    )

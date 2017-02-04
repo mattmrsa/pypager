@@ -19,7 +19,7 @@ ui_style = {
     Token.Standout2: 'underline #aa8844',
 
     # UI style
-    Token.Statusbar: 'bg:#333333 #aaaaaa',
+    Token.Statusbar: 'reverse',# bg:#333333 #aaaaaa',
     Token.Statusbar.CursorPosition: 'bold #ffffff',
 
     Token.Arg: 'reverse #ccaa00',
