@@ -300,10 +300,10 @@ def create_key_bindings(pager):
         " Suspend to bakground. "
         event.app.suspend_to_background()
 
-    return merge_key_bindings(
+    return merge_key_bindings([
         load_key_bindings(
             enable_search=True,
             enable_extra_page_navigation=True,
             enable_system_bindings=True),
         kb
-    )
+    ])
