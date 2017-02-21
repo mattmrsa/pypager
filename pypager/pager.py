@@ -21,7 +21,7 @@ from prompt_toolkit.styles import Style
 from .help import HELP
 from .key_bindings import create_key_bindings
 from .layout import PagerLayout, create_buffer_window
-from .source import FileSource, PipeSource, Source
+from .source import DummySource, FileSource, PipeSource, Source
 from .source import StringSource
 from .style import create_style
 
@@ -90,6 +90,8 @@ class Pager(object):
         self.display_titlebar = bool(titlebar_tokens)
         self.titlebar_tokens = titlebar_tokens or []
 
+        self._dummy_source = DummySource()
+
         # When this is True, always make sure that the cursor goes to the
         # bottom of the visible content. This is similar to 'tail -f'.
         self.forward_forever = False
@@ -152,29 +154,19 @@ class Pager(object):
         return self
 
     @property
-    def source(self):
-        " The current `Source`. "
-        return self.sources[self.current_source_index]
-
-    @property
     def current_source(self):
-        return self.sources[self.current_source_index]
+        " The current `Source`. "
+        try:
+            return self.sources[self.current_source_index]
+        except IndexError:
+            return self._dummy_source
 
     @property
     def current_source_info(self):
-        return self.source_info[self.current_source]
-
-#    @property
-#    def line_tokens(self):
-#        return self.source_info[self.source].line_tokens
-#
-#    @property
-#    def waiting_for_input_stream(self):
-#        return self.source_info[self.source].waiting_for_input_stream
-#
-#    @property
-#    def marks(self):
-#        return self.source_info[self.source].marks
+        try:
+            return self.source_info[self.current_source]
+        except KeyError:
+            return _SourceInfo(self, self.current_source)
 
     def open_file(self, filename):
         """
@@ -256,7 +248,7 @@ class Pager(object):
         # Try at least `info.window_height`, if this amount of data is
         # available.
         info = self.layout.dynamic_body.get_render_info()
-        source = self.source
+        source = self.current_source
         source_info = self.source_info[source]
         b = source_info.buffer
         line_tokens = source_info.line_tokens

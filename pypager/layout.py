@@ -78,7 +78,7 @@ class _DynamicBody(Container):
 
     def get_buffer_window(self):
         " Return the Container object according to which Buffer/Source is visible. "
-        return self.pager.source_info[self.pager.source].window
+        return self.pager.current_source_info.window
 
     def reset(self):
         for body in self._bodies.values():
@@ -193,12 +193,12 @@ class PagerLayout(object):
         """
         Displayed at the bottom right.
         """
-        buffer = self.pager.source_info[self.pager.source].buffer
+        buffer = self.pager.source_info[self.pager.current_source].buffer
         document = buffer.document
         row = document.cursor_position_row + 1
         col = document.cursor_position_col + 1
 
-        if self.pager.source.eof():
+        if self.pager.current_source.eof():
             percentage = int(100 * row / document.line_count)
             return [
                 (Token.Statusbar.CursorPosition,

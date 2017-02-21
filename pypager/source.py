@@ -19,6 +19,7 @@ import os
 
 __all__ = (
     'Source',
+    'DummySource',
     'PipeSource',
     'GeneratorSource',
     'StringSource',
@@ -47,6 +48,30 @@ class Source(with_metaclass(ABCMeta, object)):
 
     def close(self):
         pass
+
+
+class DummySource(Source):
+    """
+    Empty source.
+    """
+    def __init__(self):
+        self._r, self._w = os.pipe()
+        os.close(self._w)
+
+    def get_fd(self):
+        return self._r
+
+    def get_name(self):
+        return ''
+
+    def eof(self):
+        return True
+
+    def read_chunk(self):
+        return []
+
+    def close(self):
+        os.close(self._r)
 
 
 class PipeSource(Source):
