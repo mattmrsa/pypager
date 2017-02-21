@@ -5,7 +5,7 @@ from prompt_toolkit.layout.containers import HSplit, VSplit, Window, Conditional
 from prompt_toolkit.layout.controls import BufferControl, TokenListControl
 from prompt_toolkit.layout.dimension import Dimension as D
 from prompt_toolkit.layout.menus import MultiColumnCompletionsMenu
-from prompt_toolkit.layout.processors import Processor, HighlightSelectionProcessor, HighlightSearchProcessor, HighlightMatchingBracketProcessor, TabsProcessor, Transformation, ConditionalProcessor, BeforeInput, MergedProcessor
+from prompt_toolkit.layout.processors import Processor, HighlightSelectionProcessor, HighlightSearchProcessor, HighlightMatchingBracketProcessor, TabsProcessor, Transformation, ConditionalProcessor, BeforeInput, merge_processors
 from prompt_toolkit.layout.lexers import SimpleLexer
 from prompt_toolkit.layout.toolbars import SearchToolbar, SystemToolbar, TokenListToolbar
 from prompt_toolkit.token import Token
@@ -216,7 +216,7 @@ def create_buffer_window(source_info):
     """
     pager = source_info.pager
 
-    input_processor = MergedProcessor([
+    input_processor = merge_processors([
         ConditionalProcessor(
             processor=_EscapeProcessor(source_info),
             filter=Condition(lambda app: not bool(source_info.source.lexer)),
