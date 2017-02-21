@@ -202,7 +202,7 @@ class Pager(object):
         (If >1 source is left.)
         """
         if len(self.sources) > 1:
-            current_source_index = self.source
+            current_source_index = self.current_source
 
             # Focus the previous source.
             self.focus_previous_source()
