@@ -138,7 +138,7 @@ class Pager(object):
         # Hide message when a key is pressed.
         def key_pressed(_):
             self.message = None
-        self.application.key_processor.beforeKeyPress += key_pressed
+        self.application.key_processor.before_key_press += key_pressed
 
         if vi_mode:
             self.application.editing_mode = EditingMode.VI
