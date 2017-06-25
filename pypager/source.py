@@ -5,9 +5,8 @@ Input source for a pager.
 from __future__ import unicode_literals
 from abc import ABCMeta, abstractmethod
 from six import with_metaclass
-from prompt_toolkit.token import Token
 from prompt_toolkit.input.posix_utils import PosixStdinReader
-from prompt_toolkit.layout.utils import explode_tokens
+from prompt_toolkit.layout.utils import explode_text_fragments
 from prompt_toolkit.styles import Attrs
 from prompt_toolkit.output.vt100 import FG_ANSI_COLORS, BG_ANSI_COLORS
 from prompt_toolkit.output.vt100 import _256_colors as _256_colors_table
@@ -139,7 +138,7 @@ class PipeSource(Source):
         A \b with any character before should make the next character standout.
         A \b with an underscore before should make the next character emphasized.
         """
-        token = Token
+        style = ''
         line_tokens = self._line_tokens
         replace_one_token = False
 
@@ -154,9 +153,9 @@ class PipeSource(Source):
                     line_tokens.pop()
                     replace_one_token = True
                     if last_char == '_':
-                        token = Token.Standout2
+                        style = 'class:standout2'
                     else:
-                        token = Token.Standout
+                        style = 'class:standout'
                 continue
 
             elif c == '\x1b':
@@ -183,16 +182,16 @@ class PipeSource(Source):
                             current = ''
                         elif char == 'm':
                             # Set attributes and token.
-                            self._select_graphic_rendition(params)
-                            token = ('C', ) + self._attrs
+                            self._select_graphic_rendition(params)   ### TODO: use inline style.
+                            #### token = ('C', ) + self._attrs
                             break
                         else:
                             # Ignore unspported sequence.
                             break
             else:
-                line_tokens.append((token, c))
+                line_tokens.append((style, c))
                 if replace_one_token:
-                    token = Token
+                    style = ''
 
     def _select_graphic_rendition(self, attrs):
         """
@@ -320,7 +319,7 @@ class GeneratorSource(Source):
     def read_chunk(self):
         " Read data from input. Return a list of token/text tuples. "
         try:
-            return explode_tokens(next(self.generator))
+            return explode_text_fragments(next(self.generator))
         except StopIteration:
             self._eof = True
             return []
@@ -353,4 +352,4 @@ class StringSource(Source):
             return []
         else:
             self._read = True
-            return explode_tokens([(Token, self.text)])
+            return explode_text_fragments([('', self.text)])

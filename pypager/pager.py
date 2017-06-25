@@ -12,7 +12,7 @@ from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.contrib.completers import PathCompleter
 from prompt_toolkit.document import Document
 from prompt_toolkit.enums import EditingMode
-from prompt_toolkit.eventloop.base import EventLoop
+from prompt_toolkit.eventloop import get_event_loop
 from prompt_toolkit.input.defaults import create_input
 from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.layout.lexers import PygmentsLexer
@@ -23,7 +23,7 @@ from .key_bindings import create_key_bindings
 from .layout import PagerLayout, create_buffer_window
 from .source import DummySource, FileSource, PipeSource, Source
 from .source import StringSource
-from .style import create_style
+from .style import ui_style
 
 __all__ = (
     'Pager',
@@ -42,7 +42,7 @@ class _SourceInfo(object):
         self.pager = pager
         self.source = source
 
-        self.buffer = Buffer(loop=pager.loop, read_only=True)
+        self.buffer = Buffer(read_only=True)
 
         # List of lines. (Each line is a list of (token, text) tuples itself.)
         self.line_tokens = [[]]
@@ -72,13 +72,10 @@ class Pager(object):
     :param style: Prompt_toolkit `Style` instance.
     :param search_text: `None` or the search string that is highlighted.
     """
-    def __init__(self, loop, vi_mode=False, style=None, search_text=None,
+    def __init__(self, vi_mode=False, style=None, search_text=None,
                  titlebar_tokens=None):
-        assert isinstance(loop, EventLoop)
         assert isinstance(vi_mode, bool)
         assert style is None or isinstance(style, Style)
-
-        self.loop = loop
 
         self.sources = []
         self.current_source_index = 0  # Index in `self.sources`.
@@ -102,7 +99,7 @@ class Pager(object):
 
         # Create prompt_toolkit stuff.
 
-        def open_file(app, buff):
+        def open_file(buff):
             # Open file.
             self.open_file(buff.text)
 
@@ -111,29 +108,25 @@ class Pager(object):
 
         # Buffer for the 'Examine:' input.
         self.examine_buffer = Buffer(
-            loop=self.loop,
             name='EXAMINE',
             completer=PathCompleter(expanduser=True),
             accept_handler=open_file,
             multiline=False)
 
         # Search buffer.
-        self.search_buffer = Buffer(
-            loop=self.loop,
-            multiline=False)
+        self.search_buffer = Buffer(multiline=False)
 
         self.layout = PagerLayout(self)
 
         bindings = create_key_bindings(self)
         self.application = Application(
-            loop=self.loop,
             input=create_input(sys.stdout),
             layout=Layout(container=self.layout.container),
             key_bindings=bindings,
-            style=style or create_style(),
+            style=style or Style.from_dict(ui_style),
             mouse_support=True,
             on_render=self._on_render,
-            use_alternate_screen=True)
+            full_screen=True)
 
         # Hide message when a key is pressed.
         def key_pressed(_):
@@ -144,12 +137,12 @@ class Pager(object):
             self.application.editing_mode = EditingMode.VI
 
     @classmethod
-    def from_pipe(cls, loop, lexer=None):
+    def from_pipe(cls, lexer=None):
         """
         Create a pager from another process that pipes in our stdin.
         """
         assert not sys.stdin.isatty()
-        self = cls(loop)
+        self = cls()
         self.add_source(PipeSource(fileno=sys.stdin.fileno(), lexer=lexer))
         return self
 
@@ -239,7 +232,7 @@ class Pager(object):
             self.remove_current_source()
             self.displaying_help = False
 
-    def _on_render(self, cli):
+    def _on_render(self, app):
         """
         Each time when the rendering is done, we should see whether we need to
         read more data from the input pipe.
@@ -298,7 +291,7 @@ class Pager(object):
                     # or when there is nothing more to read.
                     if lines[0] <= 0 or source.eof():
                         if fd is not None:
-                            self.loop.remove_reader(fd)
+                            get_event_loop().remove_reader(fd)
                         source_info.waiting_for_input_stream = False
 
                     # Redraw.
@@ -323,7 +316,7 @@ class Pager(object):
 
                 # Add reader for stdin.
                 if fd is not None:
-                    self.loop.add_reader(fd, receive_content_from_fd)
+                    get_event_loop().add_reader(fd, receive_content_from_fd)
                 else:
                     # Execute receive_content_from_generator in thread.
                     # (Don't use 'run_in_executor', because we need a daemon.

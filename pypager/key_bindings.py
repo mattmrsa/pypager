@@ -1,4 +1,5 @@
 from __future__ import unicode_literals
+from prompt_toolkit.application import get_app
 from prompt_toolkit.enums import SEARCH_BUFFER, IncrementalSearchDirection
 from prompt_toolkit.filters import HasFocus, Condition
 from prompt_toolkit.key_binding.bindings.scroll import scroll_page_up, scroll_page_down, scroll_one_line_down, scroll_one_line_up, scroll_half_page_up, scroll_half_page_down
@@ -18,18 +19,16 @@ def create_key_bindings(pager):
     handle = kb.add
 
     @Condition
-    def has_colon(app):
+    def has_colon():
         return pager.in_colon_mode
 
     @Condition
-    def default_focus(app):
+    def default_focus():
+        app = get_app()
         return app.layout.current_window == pager.current_source_info.window
-        return True  # XXX
-        return (app.current_buffer_name.startswith('source') and
-                not pager.in_colon_mode)
 
     @Condition
-    def displaying_help(app):
+    def displaying_help():
        return pager.displaying_help
 
     for c in '01234556789':
@@ -206,7 +205,7 @@ def create_key_bindings(pager):
     def _(event):
         event.app.renderer.clear()
 
-    def search_buffer_is_empty(app):
+    def search_buffer_is_empty():
         " Returns True when the search buffer is empty. "
         return pager.search_buffer.text == ''
 
@@ -295,15 +294,16 @@ def create_key_bindings(pager):
         " Cancel 'Examine' input. "
         event.app.layout.focus(pager.current_source_info.window)
 
-    @handle(Keys.ControlZ, filter=Condition(lambda app: suspend_to_background_supported()))
+    @handle(Keys.ControlZ, filter=Condition(lambda: suspend_to_background_supported()))
     def _(event):
         " Suspend to bakground. "
         event.app.suspend_to_background()
 
     return merge_key_bindings([
         load_key_bindings(
-            enable_search=True,
-            enable_extra_page_navigation=True,
-            enable_system_bindings=True),
+            #enable_search=True,
+            #enable_extra_page_navigation=True,
+            #enable_system_bindings=True
+            ),
         kb
     ])

@@ -3,6 +3,7 @@
 pypager: A pure Python pager application.
 """
 from __future__ import unicode_literals
+from prompt_toolkit.eventloop.defaults import set_event_loop
 from prompt_toolkit.layout.lexers import PygmentsLexer
 from pypager.pager import Pager
 from pypager.source import FileSource
@@ -25,9 +26,10 @@ def run():
         from prompt_toolkit.eventloop.posix import PosixEventLoop
         from prompt_toolkit.eventloop.select import SelectSelector
         loop = PosixEventLoop(selector=SelectSelector)
+    set_event_loop(loop)
 
     if not sys.stdin.isatty():
-        pager = Pager.from_pipe(loop)
+        pager = Pager.from_pipe()
         pager.run()
     else:
         parser = argparse.ArgumentParser(description='Browse through a text file.')
@@ -43,7 +45,7 @@ def run():
         if args.vi: vi_mode = True
         if args.emacs: vi_mode = False
 
-        pager = Pager(loop, vi_mode=vi_mode)
+        pager = Pager(vi_mode=vi_mode)
 
         # Open files.
         for filename in args.filename:

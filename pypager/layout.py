@@ -1,14 +1,14 @@
 from __future__ import unicode_literals
+from prompt_toolkit.application import get_app
 from prompt_toolkit.enums import SYSTEM_BUFFER
 from prompt_toolkit.filters import HasArg, Condition, HasSearch, HasFocus
 from prompt_toolkit.layout.containers import HSplit, VSplit, Window, ConditionalContainer, Float, FloatContainer, Container, Align
-from prompt_toolkit.layout.controls import BufferControl, TokenListControl
+from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension as D
+from prompt_toolkit.layout.lexers import SimpleLexer
 from prompt_toolkit.layout.menus import MultiColumnCompletionsMenu
 from prompt_toolkit.layout.processors import Processor, HighlightSelectionProcessor, HighlightSearchProcessor, HighlightMatchingBracketProcessor, TabsProcessor, Transformation, ConditionalProcessor, BeforeInput, merge_processors
-from prompt_toolkit.layout.lexers import SimpleLexer
-from prompt_toolkit.layout.toolbars import SearchToolbar, SystemToolbar, TokenListToolbar
-from prompt_toolkit.token import Token
+from prompt_toolkit.layout.widgets.toolbars import SearchToolbar, SystemToolbar, FormattedTextToolbar
 
 from .filters import HasColon
 
@@ -33,42 +33,38 @@ class _EscapeProcessor(Processor):
 
 class _Arg(ConditionalContainer):
     def __init__(self):
-        def get_tokens(app):
+        def get_text():
+            app = get_app()
             if app.key_processor.arg is not None:
-                return [(Token.Arg, ' %s ' % app.key_processor.arg)]
+                return  ' %s ' % app.key_processor.arg
             else:
-                return []
+                return ''
 
         super(_Arg, self).__init__(
-                Window(TokenListControl(get_tokens), align=Align.RIGHT),
+                Window(FormattedTextControl(get_text), style='class:arg', align=Align.RIGHT),
                 filter=HasArg())
 
 
-class Titlebar(TokenListToolbar):
+class Titlebar(FormattedTextToolbar):
     """
     Displayed at the top.
     """
     def __init__(self, pager):
-        def get_tokens(app):
+        def get_tokens():
             return pager.titlebar_tokens
 
-        super(Titlebar, self).__init__(
-            get_tokens,
-#            default_char=Char(' ', Token.Titlebar),
-            filter=Condition(lambda app: pager.display_titlebar))
+        super(Titlebar, self).__init__(get_tokens)
 
 
-class MessageToolbarBar(TokenListToolbar):
+class MessageToolbarBar(FormattedTextToolbar):
     """
     Pop-up (at the bottom) for showing error/status messages.
     """
     def __init__(self, pager):
-        def get_tokens(app):
-            return [(Token.Message, pager.message)] if pager.message else []
+        def get_tokens():
+            return [('class:message', pager.message)] if pager.message else []
 
-        super(MessageToolbarBar, self).__init__(
-            get_tokens,
-            filter=Condition(lambda app: bool(pager.message)))
+        super(MessageToolbarBar, self).__init__(get_tokens)
 
 
 class _DynamicBody(Container):
@@ -96,6 +92,9 @@ class _DynamicBody(Container):
     def write_to_screen(self, *a, **kw):
         return self.get_buffer_window().write_to_screen(*a, **kw)
 
+    def get_children(self):
+        return [self.get_buffer_window()]
+
     def walk(self, *a, **kw):
         # Required for prompt_toolkit.layout.utils.find_window_for_buffer_name.
         return self.get_buffer_window().walk(*a, **kw)
@@ -111,9 +110,9 @@ class PagerLayout(object):
 
         self.examine_control = BufferControl(
             buffer=pager.examine_buffer,
-            lexer=SimpleLexer(token=Token.Toolbar.Examine.Text),
+            lexer=SimpleLexer(style='class:examine,examine-text'),
             input_processor=BeforeInput(
-                lambda app: [(Token.Toolbar.Examine, ' Examine: ')]),
+                lambda: [('class:examine', ' Examine: ')]),
             )
 
         self.search_toolbar = SearchToolbar(
@@ -122,32 +121,33 @@ class PagerLayout(object):
 
         self.container = FloatContainer(
             content=HSplit([
-                Titlebar(pager),
+                ConditionalContainer(
+                    content=Titlebar(pager),
+                    filter=Condition(lambda: pager.display_titlebar)),
                 self.dynamic_body,
                 self.search_toolbar,
-                SystemToolbar(loop=pager.loop),
+                SystemToolbar(),
                 ConditionalContainer(
                     content=VSplit([
                             Window(height=D.exact(1),
-                                   content=TokenListControl(self._get_statusbar_left_tokens),
-                                    token=Token.Statusbar),
+                                   content=FormattedTextControl(self._get_statusbar_left_tokens),
+                                   style='class:statusbar'),
                             Window(height=D.exact(1),
-                                   content=TokenListControl(self._get_statusbar_right_tokens),
-                                   token=Token.Statusbar,
+                                   content=FormattedTextControl(self._get_statusbar_right_tokens),
+                                   style='class:statusbar',
                                    align=Align.RIGHT),
                         ]),
                     filter=~HasSearch() & ~HasFocus(SYSTEM_BUFFER) & ~has_colon & ~HasFocus('EXAMINE')),
                 ConditionalContainer(
-                    content=TokenListToolbar(
-                        lambda app: [(Token.Statusbar, ' :')],
-#                        default_char=Char(token=Token.Statusbar)
+                    content=FormattedTextToolbar(
+                        lambda: [('class:statusbar', ' :')],
                     ),
                     filter=has_colon),
                 ConditionalContainer(
                     content=Window(
                         self.examine_control,
                         height=D.exact(1),
-                        token=Token.Toolbar.Examine),
+                        style='class:examine'),
                     filter=HasFocus(pager.examine_buffer)),
 #                ConditionalContainer(
 #                    content=Window(
@@ -165,21 +165,24 @@ class PagerLayout(object):
                 Float(right=0, height=1, bottom=1,
                       content=_Arg()),
                 Float(bottom=1, left=0, right=0, height=1,
-                      content=MessageToolbarBar(pager)),
+                      content=ConditionalContainer(
+                          content=MessageToolbarBar(pager),
+                          filter=Condition(lambda: bool(pager.message)))
+                ),
                 Float(right=0, height=1, bottom=1,
                       content=ConditionalContainer(
-                          content=TokenListToolbar(
-                              lambda app: [(Token.Loading, ' Loading... ')],
+                          content=FormattedTextToolbar(
+                              lambda: [('class:loading', ' Loading... ')],
 #                              default_char=Char(token=Token.Statusbar)
                           ),
-                          filter=Condition(lambda app: pager.current_source_info.waiting_for_input_stream))),
+                          filter=Condition(lambda: pager.current_source_info.waiting_for_input_stream))),
                 Float(xcursor=True,
                       ycursor=True,
                       content=MultiColumnCompletionsMenu()),
             ]
         )
 
-    def _get_statusbar_left_tokens(self, app):
+    def _get_statusbar_left_tokens(self):
         """
         Displayed at the bottom left.
         """
@@ -187,9 +190,9 @@ class PagerLayout(object):
             message = ' HELP -- Press q when done'
         else:
             message = ' (press h for help or q to quit)'
-        return [(Token.Statusbar, message)]
+        return [('class:statusbar', message)]
 
-    def _get_statusbar_right_tokens(self, app):
+    def _get_statusbar_right_tokens(self):
         """
         Displayed at the bottom right.
         """
@@ -201,11 +204,11 @@ class PagerLayout(object):
         if self.pager.current_source.eof():
             percentage = int(100 * row / document.line_count)
             return [
-                (Token.Statusbar.CursorPosition,
+                    ('class:statusbar,cursor-position',
                  ' (%s,%s) %s%% ' % (row, col, percentage))]
         else:
             return [
-                (Token.Statusbar.CursorPosition,
+                ('class:statusbar,cursor-position',
                  ' (%s,%s) ' % (row, col))]
 
 
@@ -219,13 +222,13 @@ def create_buffer_window(source_info):
     input_processor = merge_processors([
         ConditionalProcessor(
             processor=_EscapeProcessor(source_info),
-            filter=Condition(lambda app: not bool(source_info.source.lexer)),
+            filter=Condition(lambda: not bool(source_info.source.lexer)),
         ),
         TabsProcessor(),
         HighlightSelectionProcessor(),
         ConditionalProcessor(
             processor=HighlightSearchProcessor(preview_search=True),
-            filter=Condition(lambda app: pager.highlight_search),
+            filter=Condition(lambda: pager.highlight_search),
         ),
         HighlightMatchingBracketProcessor(),
     ])
