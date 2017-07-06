@@ -122,6 +122,7 @@ class Pager(object):
         self.application = Application(
             input=create_input(sys.stdout),
             layout=Layout(container=self.layout.container),
+            enable_page_navigation_bindings=True,
             key_bindings=bindings,
             style=style or Style.from_dict(ui_style),
             mouse_support=True,

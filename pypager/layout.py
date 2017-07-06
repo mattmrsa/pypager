@@ -173,7 +173,6 @@ class PagerLayout(object):
                       content=ConditionalContainer(
                           content=FormattedTextToolbar(
                               lambda: [('class:loading', ' Loading... ')],
-#                              default_char=Char(token=Token.Statusbar)
                           ),
                           filter=Condition(lambda: pager.current_source_info.waiting_for_input_stream))),
                 Float(xcursor=True,
