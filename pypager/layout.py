@@ -8,7 +8,7 @@ from prompt_toolkit.layout.dimension import Dimension as D
 from prompt_toolkit.layout.lexers import SimpleLexer
 from prompt_toolkit.layout.menus import MultiColumnCompletionsMenu
 from prompt_toolkit.layout.processors import Processor, HighlightSelectionProcessor, HighlightSearchProcessor, HighlightMatchingBracketProcessor, TabsProcessor, Transformation, ConditionalProcessor, BeforeInput, merge_processors
-from prompt_toolkit.layout.widgets.toolbars import SearchToolbar, SystemToolbar, FormattedTextToolbar
+from prompt_toolkit.widgets.toolbars import SearchToolbar, SystemToolbar, FormattedTextToolbar
 
 from .filters import HasColon
 
