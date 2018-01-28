@@ -126,7 +126,7 @@ class Pager(object):
             key_bindings=bindings,
             style=style or Style.from_dict(ui_style),
             mouse_support=True,
-            on_render=self._on_render,
+            after_render=self._after_render,
             full_screen=True)
 
         # Hide message when a key is pressed.
@@ -233,7 +233,7 @@ class Pager(object):
             self.remove_current_source()
             self.displaying_help = False
 
-    def _on_render(self, app):
+    def _after_render(self, app):
         """
         Each time when the rendering is done, we should see whether we need to
         read more data from the input pipe.
